@@ -110,3 +110,19 @@ python tools/check_auth.py /path/to/auth.json
 - 不要把这个 `auth.json` 发给任何人：它等价于账号额度
 - 不要在共享/合租账号里放未发表的论文、基金本子原文（会话会同步到账号云端）
 - 不要期待它自动续期，也不要去改代码「伪造 refresh_token」——服务端只认授权码流程签发的那一种
+
+---
+
+## 七、许可与归属
+
+本仓库以 **MIT License** 发布，全文见 [LICENSE](./LICENSE)。
+
+- 原始项目：[zhishile/codex-auth-helper](https://github.com/zhishile/codex-auth-helper)，Copyright (c) 2026 zhishile
+- 本 fork 的修改：Copyright (c) 2026 WANGJIEYI
+- 转载/二次分发请保留上述署名与许可证声明。上游 README 声明 MIT 但仓库内未附 LICENSE 文件，本文件为 fork 补充。
+
+## 八、免责声明
+
+本项目仅用于导出**你自己已登录**的会话凭证，便于在自有设备上免去重复登录。
+使用者需自行确认其使用方式符合 OpenAI 服务条款与所在地法律；
+绕过登录验证存在账号被风控、封禁的风险，作者不承担由此产生的后果。

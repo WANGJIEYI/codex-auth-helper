@@ -1,6 +1,10 @@
 # 🔐 Codex 认证助手 (Codex Auth Helper)
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](./extension/manifest.json)
+> **本仓库是 fork。** 上游：https://github.com/zhishile/codex-auth-helper
+> 修改内容、能力边界与自测方式见 **[README-FORK.md](./README-FORK.md)**。
+> 一句话概括：本 fork 修的是「导出契约」，不是「免验证推理」——登录可用，推理请求仍会被服务端拒绝。
+
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](./extension/manifest.json)
 [![Manifest V3](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-orange.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Local Only](https://img.shields.io/badge/Security-100%25_Local-green.svg)](#-安全与隐私承诺)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
