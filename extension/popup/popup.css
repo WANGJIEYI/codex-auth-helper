@@ -782,3 +782,21 @@ details summary {
   opacity: 1;
   transition: 0s;
 }
+
+/* ===== [FORK] 剩余寿命警告条 ===== */
+.ttl-warning {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: rgba(255, 176, 32, 0.12);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+  color: #ffcf7a;
+}
+
+.ttl-warning.danger {
+  background: rgba(255, 76, 76, 0.12);
+  border-color: rgba(255, 76, 76, 0.5);
+  color: #ff9d9d;
+}

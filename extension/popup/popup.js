@@ -5,13 +5,35 @@
 let globalSession = null;
 let countdownInterval = null;
 
-document.addEventListener('DOMContentLoaded', () => {
-  // 初始化界面获取数据
-  initSessionFetch();
-  
-  // 绑定基础事件监听
-  bindEvents();
-});
+// [FORK] 允许在 Node 里直接 require 本文件做单元测试（浏览器环境下行为不变）
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    // 初始化界面获取数据
+    initSessionFetch();
+
+    // 绑定基础事件监听
+    bindEvents();
+  });
+}
+
+/**
+ * [FORK] 解析会话的 access_token 过期时间。
+ * 只用 session.expires 一个来源：它是 OpenAI 签发 /api/auth/session 时给的权威值。
+ * 解析失败返回 null，调用方必须按「不可用」处理，禁止再编一个假期。
+ */
+function sessionAccessExpiry(session) {
+  if (!session || !session.expires) return null;
+  const t = new Date(session.expires).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * [FORK] 导出前的可用性体检。返回剩余毫秒数，或 null 表示拿不到过期时间。
+ */
+function sessionRemainingMs(session, now = Date.now()) {
+  const exp = sessionAccessExpiry(session);
+  return exp === null ? null : exp - now;
+}
 
 /**
  * 初始化 Session 获取
@@ -89,14 +111,49 @@ function renderAuthorizedState(session) {
 
   // 有效期至
   const expiresTime = session.expires ? new Date(session.expires) : null;
-  if (expiresTime) {
+  if (expiresTime && Number.isFinite(expiresTime.getTime())) {
     expiresEl.textContent = formatLocalDate(expiresTime);
     // 启动剩余期限实时倒计时
     startCountdown(expiresTime);
   } else {
-    expiresEl.textContent = '长期有效';
-    document.getElementById('token-countdown').textContent = '无限';
+    // [FORK] 原来这里写「长期有效」+「无限」，会让用户导出白导一次。
+    // 拿不到过期时间就不能导出，明确阻止。
+    expiresEl.textContent = '未知（无法导出）';
+    document.getElementById('token-countdown').textContent = '—';
   }
+
+  // [FORK] 剩余寿命不到 24 小时时亮警告条
+  updateTtlWarning(sessionRemainingMs(session));
+}
+
+/**
+ * [FORK] 剩余寿命警告条。少于 24h 时提示先重新登录网页再导出。
+ */
+function updateTtlWarning(remainingMs) {
+  const el = typeof document !== 'undefined' ? document.getElementById('ttl-warning') : null;
+  if (!el) return;
+
+  if (remainingMs === null) {
+    el.textContent = '⚠️ 读不到 access_token 过期时间，无法判断可用期，已禁用导出。';
+    el.hidden = false;
+    el.className = 'ttl-warning danger';
+    return;
+  }
+  if (remainingMs <= 0) {
+    el.textContent = '⚠️ 网页会话的 access_token 已过期，请刷新 chatgpt.com 重新登录后再导出。';
+    el.hidden = false;
+    el.className = 'ttl-warning danger';
+    return;
+  }
+  if (remainingMs < 24 * 3600 * 1000) {
+    el.textContent = `⚠️ 剩余不到 24 小时（${Math.floor(remainingMs / 3600000)} 小时），导出的文件很快就会失效，建议先刷新网页再导出。`;
+    el.hidden = false;
+    el.className = 'ttl-warning danger';
+    return;
+  }
+  el.hidden = true;
+  el.textContent = '';
+  el.className = 'ttl-warning';
 }
 
 /**
@@ -112,6 +169,18 @@ function bindEvents() {
   // 2. 导出 auth.json — 委托给 background service worker 执行下载
   document.getElementById('btn-download').addEventListener('click', () => {
     if (!globalSession) return;
+
+    // [FORK] 导出前把「注定马上失效」的文件挡掉
+    const remaining = sessionRemainingMs(globalSession);
+    if (remaining === null) {
+      showToast('❌ 读不到过期时间，无法导出');
+      return;
+    }
+    if (remaining < 10 * 60 * 1000) {
+      showToast('❌ 会话剩余不足 10 分钟，请刷新网页后重试');
+      return;
+    }
+
     const authJsonString = generateCodexAuthJson(globalSession);
     
     chrome.runtime.sendMessage({
@@ -179,18 +248,25 @@ function formatLocalDate(date) {
 
 /**
  * 核心转换逻辑：将获取到的 ChatGPT Session 数据转化为符合 Codex 要求的格式
- * 
- * ⚠️ 已知限制：refresh_token 使用的是 ChatGPT 的 sessionToken，
- * 它不是真正的 OAuth2 refresh_token（真正的 refresh_token 只能通过 auth.openai.com
- * 的验证流程获取，而该流程需要手机验证——正是本插件想绕过的障碍）。
- * Codex 在尝试刷新 token 时可能会失败，届时需要重新导出 auth.json。
+ *
+ * [FORK] 本文件明确不做「伪造 refresh_token」这件事：
+ *   - 网页 session 拿不到 auth.openai.com 签发的 refresh_token，任何伪造值都会被 400 拒绝；
+ *   - 因此这个 auth.json 的寿命 = access_token 的自然寿命（当前样本约 5~6 天）；
+ *   - 只要 last_refresh 是导出时刻，Codex 在 8 天内不会尝试刷新，期间正常可用；
+ *   - 到期后重新导出即可，不要指望它自己续期。
  */
 function generateCodexAuthJson(session) {
   const accountId = session.account?.id || '';
   const email = session.user?.email || '';
   const planType = session.account?.planType || 'free';
+
+  // [FORK] 过期时间只认 session.expires；拿不到或已过期就直接抛，
+  // 不再用 iat + 30 天兜底（那会让 auth.json 显示「还有效」，实际请求立刻 401）。
+  const accessExpMs = sessionAccessExpiry(session);
+  if (accessExpMs === null) throw new Error('SESSION_EXPIRY_UNKNOWN');
   const iat = Math.floor(Date.now() / 1000);
-  const exp = session.expires ? Math.floor(new Date(session.expires).getTime() / 1000) : iat + (30 * 24 * 3600);
+  const exp = Math.floor(accessExpMs / 1000);
+  if (exp <= iat) throw new Error('SESSION_EXPIRED');
 
   // 构建 Synthetic id_token (无签名 JWT)
   const jwtHeader = { alg: 'none', typ: 'JWT', cpa_synthetic: true };
@@ -219,7 +295,12 @@ function generateCodexAuthJson(session) {
     tokens: {
       id_token: syntheticIdToken,
       access_token: session.accessToken,
-      refresh_token: session.sessionToken || "placeholder",
+      // [FORK] 强制空串，不再写 "placeholder"。
+      // 理由：refresh_token 只能由 auth.openai.com 的授权码 + PKCE 流程签发，
+      // 网页 sessionToken / session token cookie 都换不出可用的 refresh token。
+      // 写假值只会让服务端返回 invalid_grant，日志更乱；空串语义更诚实。
+      // 代价：Codex 的 doctor 会报「stored credentials are incomplete」——已知且故意保留。
+      refresh_token: "",
       account_id: accountId
     },
     last_refresh: new Date().toISOString()
@@ -256,4 +337,14 @@ function showToast(message) {
   setTimeout(() => {
     toast.classList.remove('show');
   }, 2000);
+}
+
+// [FORK] Node 测试入口：浏览器里 module 未定义，这段不执行
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    generateCodexAuthJson,
+    sessionAccessExpiry,
+    sessionRemainingMs,
+    updateTtlWarning,
+  };
 }
